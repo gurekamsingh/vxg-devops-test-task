@@ -1,42 +1,65 @@
 #!/bin/bash
+set -euo pipefail
 
-set -e
+# Set KUBECONFIG to work without sudo
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-echo "[*] Updating packages..."
+echo "[*] Updating packages and installing dependencies..."
 sudo apt-get update -y
+sudo apt-get install -y curl helm
 
-echo "[*] Installing dependencies (curl, git)..."
-sudo apt-get install -y curl git
+# Install k3s if not already installed
+if ! command -v k3s &> /dev/null; then
+  echo "[*] Installing k3s..."
+  curl -sfL https://get.k3s.io | sh -
+else
+  echo "[+] k3s is already installed"
+fi
 
-echo "[*] Installing k3s..."
-curl -sfL https://get.k3s.io | sh -
+# Wait for node to be Ready
+echo "[*] Waiting for k3s node to be ready..."
+ATTEMPTS=0
+until kubectl get nodes 2>/dev/null | grep -q ' Ready '; do
+  ((ATTEMPTS++))
+  if [ "$ATTEMPTS" -gt 20 ]; then
+    echo "[!] Node not ready after multiple attempts, exiting."
+    exit 1
+  fi
+  sleep 5
+done
 
-echo "[*] Waiting for k3s to start..."
-sleep 15
-sudo kubectl get nodes
+# Copy kubeconfig to ubuntu user home
+cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/kubeconfig.yaml
+chown ubuntu:ubuntu /home/ubuntu/kubeconfig.yaml
 
-echo "[*] Installing Helm..."
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+export KUBECONFIG=/home/ubuntu/kubeconfig.yaml
 
 echo "[*] Adding Helm repos..."
-helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
-echo "[*] Deploying sample NGINX app..."
-helm install my-nginx bitnami/nginx
+# Create namespace if not exists
+kubectl get namespace monitoring &>/dev/null || kubectl create namespace monitoring
 
+# Deploy sample app (NGINX)
+echo "[*] Deploying NGINX using Helm..."
+helm upgrade --install nginx-release oci://registry-1.docker.io/bitnamicharts/nginx \
+  --namespace default \
+  --create-namespace
+
+# Deploy Prometheus
 echo "[*] Deploying Prometheus..."
-helm install my-prometheus prometheus-community/prometheus
+helm upgrade --install prometheus prometheus-community/prometheus \
+  --namespace monitoring \
+  --create-namespace
 
-echo "[*] Waiting for services to be up..."
-sleep 30
+# Wait for Prometheus pods to be ready
+kubectl rollout status deployment prometheus-server -n monitoring
 
-echo "[*] Getting Prometheus pods and services..."
-sudo kubectl get pods -A
-sudo kubectl get svc -A
+# Sample metric collection
+echo "[*] Sample Prometheus metrics:"
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
 
-echo "[*] Verifying metric collection..."
-sudo kubectl get --raw /metrics || echo "Prometheus metrics endpoint not ready yet."
-
-echo "[+] Setup complete. NGINX and Prometheus are now deployed on k3s!"
+echo "[*] Setup complete. You can port-forward Prometheus using:"
+echo "kubectl port-forward svc/prometheus-server 9090:80 -n monitoring"
