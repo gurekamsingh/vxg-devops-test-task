@@ -6,7 +6,9 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 echo "[*] Updating packages and installing dependencies..."
 sudo apt-get update -y
-sudo apt-get install -y curl helm
+echo "[*] Installing Helm..."
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
 
 # Install k3s if not already installed
 if ! command -v k3s &> /dev/null; then
