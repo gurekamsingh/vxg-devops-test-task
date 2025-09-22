@@ -16,9 +16,6 @@ This repo automates provisioning an EC2 instance on AWS, installs k3s, deploys a
 4. Port-forward Prometheus if needed
 ...
 
-## Sample Metric Output
-(Screenshot)
-
 ## Notes
 - Security group allows SSH + HTTP only
 - Prometheus is deployed in the `monitoring` namespace
